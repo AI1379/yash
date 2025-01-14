@@ -131,18 +131,24 @@ export function createScanner(input: string, initialOffset = 0, initialState: Sc
                 stream.advance(1);
                 return finishToken(offset, TokenType.Unknown);
             case ScannerState.WithinTypeValue:
+                // TODO: finish implementation of type value scanner
                 if (stream.advanceIfChar(_RAN)) { // >
                     state = ScannerState.WithinContent;
                     return finishToken(offset, TokenType.EndType);
                 }
-
-                const typeValue = nextWord();
-                if (typeValue.length > 0) {
-                    return finishToken(offset, TokenType.TypeValue);
+                let current = 1; // current open brackets
+                while (current > 0) {
+                    if (stream.advanceIfChar(_LAN)) { // < in type value for C++ and Java templates
+                        current++;
+                    } else if (stream.advanceIfChar(_RAN)) { // and >
+                        current--;
+                    } else {
+                        stream.advance(1);
+                    }
                 }
-                stream.advance(1);
-                state = ScannerState.WithinContent;
-                return finishToken(offset, TokenType.Unknown);
+                stream.goBack(1);
+                // state = ScannerState.WithinContent;
+                return finishToken(offset, TokenType.TypeValue);
             case ScannerState.WithinComment:
                 if (stream.advanceIfChars([_AST, _FSL])) { // */
                     state = ScannerState.WithinContent;

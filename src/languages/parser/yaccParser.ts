@@ -15,7 +15,16 @@ enum ParserState {
     WaitingPrecedence,
     WaitingRule,
     WaitingUnion,
+    WaitingLanguage,
+    WaitingSkeleton,
     Normal
+};
+
+export enum EmbeddedLanguageType {
+    C,
+    CPP,
+    JAVA,
+    D
 };
 
 export interface ISymbol {
@@ -52,6 +61,7 @@ export interface YACCDocument {
     readonly namedReferences: { [name: string]: INamedReference };
     readonly rulesRange: [number, number];
     readonly problems: Problem[];
+    embeddedLanguage: EmbeddedLanguageType;
 
     getNodeByOffset(offset: number): Node | undefined;
     getEmbeddedNode(offset: number): Node | undefined;
@@ -63,6 +73,8 @@ export enum NodeType {
     Type,
     Precedence,
     Rule,
+    Language,
+    Skeleton,
     Embedded
 };
 
@@ -103,6 +115,7 @@ export function parse(text: string): YACCDocument {
         namedReferences,
         rulesRange,
         problems,
+        embeddedLanguage: EmbeddedLanguageType.C,
 
         getNodeByOffset(offset: number): Node | undefined {
             return binarySearch(this.nodes, offset, (node, offset) => offset < node.offset ? 1 : (offset > node.end ? -1 : 0))
@@ -250,6 +263,14 @@ export function parse(text: string): YACCDocument {
                         lastNode = { nodeType: NodeType.Precedence, offset: offset, length: -1, end: -1 }
                         state = ParserState.WaitingPrecedence;
                         break;
+                    case '%language':
+                        lastNode = { nodeType: NodeType.Language, offset: offset, length: -1, end: -1 }
+                        state = ParserState.WaitingLanguage;
+                        break;
+                    case '%skeleton':
+                        lastNode = { nodeType: NodeType.Skeleton, offset: offset, length: -1, end: -1 }
+                        state = ParserState.WaitingSkeleton;
+                        break;
                     default:
                         break;
                 }
@@ -267,7 +288,8 @@ export function parse(text: string): YACCDocument {
                 // extract the type inside the tag <[type]>
                 type = scanner.getTokenText();
                 const t = document.types[type];
-                if (t) {
+                // TODO: Implement type checking for C++ and Java
+                if (t || document.embeddedLanguage === EmbeddedLanguageType.CPP) {
                     t.references.push([scanner.getTokenOffset(), scanner.getTokenEnd()]);
                 } else {
                     addProblem(`Type was not declared in the %union.`, scanner.getTokenOffset(), scanner.getTokenEnd(), ProblemType.Error);
@@ -429,6 +451,20 @@ export function parse(text: string): YACCDocument {
                             references: [[offset, scanner.getTokenEnd()]]
                         });
                         break;
+                    case ParserState.WaitingLanguage:
+                        if (word.slice(1, -1).toLowerCase() === 'c++') {
+                            document.embeddedLanguage = EmbeddedLanguageType.CPP;
+                        } else if (word.slice(1, -1).toLowerCase() === 'java') {
+                            document.embeddedLanguage = EmbeddedLanguageType.JAVA;
+                        }
+                        break;
+                    case ParserState.WaitingSkeleton:
+                        if (word.slice(1, -1).toLowerCase().endsWith('.cc')) {
+                            document.embeddedLanguage = EmbeddedLanguageType.CPP;
+                        } else if (word.slice(1, -1).toLowerCase().endsWith('.java')) {
+                            document.embeddedLanguage = EmbeddedLanguageType.CPP;
+                        }
+                        break;
                 }
                 break;
             }
@@ -514,7 +550,8 @@ export function parse(text: string): YACCDocument {
                     const symbol = document.symbols[node.name!];
                     const config = workspace.getConfiguration('yash');
                     const yyType = config.get('YYTYPE', '');
-                    if (!symbol.type && yyType === '') {
+                    // TODO: Implement type checking for C++ and Java
+                    if (!symbol.type && yyType === '' && document.embeddedLanguage !== EmbeddedLanguageType.CPP) {
                         addProblem('Semantic value used inside actions but has not declared the type.',
                             symbol.offset,
                             symbol.end,
